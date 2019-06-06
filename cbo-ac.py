@@ -24,14 +24,11 @@ parentdir = os.path.dirname(currentdir)
 sys.path.insert(0,parentdir)
 
 import labrad
+import labrad.units as U
 import numpy as np
 import math
 import time
 import yaml
-
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib import cm
 
 X_MAX = 10.0
 X_MIN = -10.0
@@ -54,6 +51,7 @@ def create_file(dv, cfg, **kwargs): # try kwarging the vfixed
     measurement = cfg['measurement']
     var_name1 = cfg[measurement]['v1']
     var_name2 = cfg[measurement]['v2']
+    dac_adc = cfg['dacadc_settings']
 
     plot_parameters = {'extent': [cfg['meas_parameters']['vset_rng'][0],
                                   cfg['meas_parameters']['vset_rng'][1],
@@ -78,12 +76,15 @@ def create_file(dv, cfg, **kwargs): # try kwarging the vfixed
     for parameter in lockin_parameters:
         dv.add_parameter(parameter, cfg['lockin_settings'][parameter])
 
-    dv.add_parameter('vset_rng', cfg['meas_parameters']['vset_rng'])
+    dv.add_parameter('delay_unit', dac_adc['delay_unit'])
+
+    dv.add_parameter('vset_rng', tuple(cfg['meas_parameters']['vset_rng']))
     dv.add_parameter('vset_pnts', cfg['meas_parameters']['vset_pnts'])
-    dv.add_parameter('vgate_rng', cfg['meas_parameters']['vgate_rng'])
+    dv.add_parameter('vgate_rng', tuple(cfg['meas_parameters']['vgate_rng']))
     dv.add_parameter('vgate_pnts', cfg['meas_parameters']['vgate_pnts'])
     dv.add_parameter('extent', tuple(plot_parameters['extent']))
     dv.add_parameter('pxsize', tuple(plot_parameters['pxsize']))
+    dv.add_parameter('live_plots', [('vset', 'vgate', 'R')])
     #dv.add_parameter('plot', cfg['plot'])
 
     if kwargs is not None:
@@ -112,13 +113,17 @@ def main():
     measurement_settings = cfg[measurement]
     dacadc_settings = cfg['dacadc_settings']
     meas_parameters = cfg['meas_parameters']
+    delay_meas = meas_parameters['delay']
 
 
     # Lockin settings
     lockin_settings = cfg['lockin_settings']
     tc_var = lockin_settings['tc']
     sens_var = lockin_settings['sensitiviy']
-    delay_meas = 3 * tc_var * 1e6
+    #delay_meas = 3 * tc_var * 1e6
+
+    if delay_meas* 1e-6 < 3*tc_var:
+        print("Warning: delay is less than 3x lockin time constant.")
     
     # Labrad connections and Instrument Configurations
 
@@ -127,13 +132,16 @@ def main():
     dv = cxn.data_vault
     dac_adc = cxn.dac_adc
     dac_adc.select_device()
+    timeout = dacadc_settings['timeout']
+    dac_adc.delay_unit(dacadc_settings['delay_unit'])
+    dac_adc.timeout(U.Value(timeout, 's'))
     dac_adc.read()
     dac_adc.read()
 
     # Create datavault data set
     create_file(dv, cfg)
 
-    # Ploting parameters
+    # Mesh parameters
 
     pxsize = (meas_parameters['vset_pnts'], meas_parameters['vgate_pnts'])
     extent = (meas_parameters['vset_rng'][0], meas_parameters['vset_rng'][1],
@@ -149,7 +157,7 @@ def main():
     # Estimated time
     est_time = (num_x * num_y + num_y) * delay_meas * 1e-6 / 60.0
     dt = num_x*delay_meas*1e-6/60.0
-    print("Will take a total of {} mins. With each line trace taking {} ".format(est_time, dt))
+    print("Will take a total of {} mins. With each line trace taking {} This deprecated for SET.".format(est_time, dt))
 
     m = mesh(offset=(0.0, -0.0), xrange=(extent[0], extent[1]),
              yrange=(extent[2], extent[3]), pxsize=pxsize)
@@ -191,16 +199,18 @@ def main():
 
         # Ramping to initial values
         if i == 0:
-            d_read = dac_adc.ramp1(dac1_ch, 0, vec_x[start], 1000, 1000)
+            d_read = dac_adc.ramp1(dac1_ch, 0, vec_x[start], 10000, 300)
+            time.sleep(1)
         else:
-            previous_vec_x = m[i-1, :][:, 1] 
-            d_read = dac_adc.ramp1(dac1_ch, previous_vec_x[stop], vec_x[start], 1000, 1000)
+            previous_vec_x = m[i-1, :][:, 0] 
+            d_read = dac_adc.ramp1(dac1_ch, previous_vec_x[stop], vec_x[start], 10000, 300)
 
         if i == 0:
-            d_read = dac_adc.ramp1(dac2_ch, 0, vec_y[start], 1000, 1000)
-        # else:
-        #     previous_vec_y = m[i-1, :][:, 1] 
-        #     d_read = dac_adc.ramp1(dac2_ch, previous_vec_y[stop], vec_y[start], 1000, 1000)    
+            d_read = dac_adc.ramp1(dac2_ch, 0, vec_y[start], 200, 500)
+            time.sleep(1)
+        else:
+            previous_vec_y = m[i-1, :][:, 1] 
+            d_read = dac_adc.ramp1(dac2_ch, previous_vec_y[stop], vec_y[start], 200, 500)
 
         print("{} of {}  --> Ramping. Points: {}".format(i + 1, num_y, num_points))
         d_read = dac_adc.buffer_ramp([dac1_ch, dac2_ch],
@@ -213,7 +223,8 @@ def main():
 
         data_x[start:stop + 1], data_y[start:stop + 1] = d_tmp
 
-        radius = np.sqrt(np.square(data_x) + np.square(data_y))
+        radius = np.sqrt(np.square(data_x) + np.square(data_y)) * sens_var
+        #radius = np.array(data_x)
         phase = np.arctan2(data_y, data_x)
 
         # TODO rescale lock in sensitivity
@@ -221,22 +232,19 @@ def main():
         j = np.linspace(0, num_x - 1, num_x)
         ii = np.ones(num_x) * i
         t1 = np.ones(num_x) * time.time() - t0
-        totdata = np.array([j, ii, radius, radius, vec_x, vec_y, md, mn, data_x, data_y, t1])
+        totdata = np.array([j, ii, vec_x, vec_y, radius, phase, md, mn, data_x, data_y, t1])
         dv.add(totdata.T)
+
+        # Ramp down to zero if last point
+        if (i == num_y-1):
+            dac_adc.ramp1(dac1_ch, vec_x[stop], 0, 10000, 300)
+            dac_adc.ramp1(dac2_ch, vec_x[stop], 0, 1000, 5000)
+
 
     print("it took {} s. to write data".format(time.time() - t0))
 
-    # print(np.reshape(vec_y, (10)))
-    # print(np.shape(vec_x))
-    # print(np.shape(radius))
 
 
-    # fig = plt.figure()
-    # ax = fig.gca(projection='3d')
-
-    # surf = ax.plot_surface(mn, mn, radius, rstride=1, cstride=1, cmap=cm.coolwarm, antialiased=True)
-
-    # plt.show()
 
     # TODO ramp to zero
 
