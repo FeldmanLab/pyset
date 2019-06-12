@@ -16,25 +16,24 @@
 
 file:
   data_dir: CBO
-  file_name: AC-2T
-  comment:  AC CBO at 2T with LPF between SET and lockin input and auto phase.
+  file_name: Debugging
+  comment: Comment
 
-lockin: SR830  # Write 'SR830' or '7820'
+#lockin: SR830  # Write 'SR830' or '7820'
 
 lockin_settings:
-  tc: 0.3
-  sensitiviy: 1.0
+  tc: 0.03
+  sensitivity: 0.1
+  attenuation: 40
   amplitude: 0.004
-  freq: 189.82
-  phase: AUTO
-
-
+  freq: 371.6
+  phase: 87.28
 
 dacadc_settings:
   delay_unit: 1 # 0 for microseconds and 1 for miliseconds
   timeout: 20  # Seconds
-  dac1_ch: 0   # gate
-  dac2_ch: 1   # set
+  dac1_ch: 0   # Vgate fast
+  dac2_ch: 1   # Vset slow
   dac1_offset: 0.0 # Not in use
   dac2_offset: 0.0 # Not in use
   adc1_ch: 0
@@ -43,18 +42,24 @@ dacadc_settings:
 measurement: CBO
 
 CBO:
-  v1: vset [V]
-  v2: vgate [V]
+  v1: vgate [V]
+  v2: vset [V]
 
-
-# !!!!!!!! SET IS VGATE !!!!!!!
 meas_parameters:
-  vset_pnts: 1000
-  vgate_pnts: 200
-  vset_rng:
-    - 0.0
-    - 10.0
+  vgate_pnts: 2000 #200
+  vset_pnts: 120 #550
   vgate_rng:
-    - -10.0
-    - 10.0
-  delay: 15000
+    - -10 #-7.0
+    - 10 #7.0
+  vset_rng:
+    - -8.0    #-10.0
+    - 8.0    #10.0
+  delay: 90  # Check delay unit
+
+# BE CAREFULL!!!
+max_values:
+  vgate_rate: 1 # V/s
+  vgate_step_size: 10.0e-3 # V
+
+  vset_rate: 1 # V/s
+  vset_step_size: 10.0e-3 # V

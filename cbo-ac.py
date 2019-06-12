@@ -40,6 +40,27 @@ ADC_AVGSIZE = 1
 adc_offset = np.array([0.0, 0.0])
 adc_slope = np.array([1.0, 1.0])
 
+def safety_check(meas_parameters, max_values, time_factor):
+    # Ramp Vgate settings check
+    vgate_rng = (meas_parameters['vgate_rng'][1] - meas_parameters['vgate_rng'][0])
+    vgate_rate = vgate_rng / (meas_parameters['vgate_pnts'] * meas_parameters['delay'] * time_factor)
+    if vgate_rate > max_values['vgate_rate']:
+        raise ValueError('Vgate rate too high: ' + str(vgate_rate) + ' V/s.')
+
+    vgate_step_size = vgate_rng / meas_parameters['vgate_pnts']
+    if vgate_step_size > max_values['vgate_step_size']:
+        raise ValueError('Vgate step size too high: ' + str(vgate_step_size) + ' V.')
+
+    return 0
+
+
+def time_factor(unit):
+    if unit == 0:
+        return 1e-6
+    if unit == 1:
+        return 1e-3
+
+
 def create_file(dv, cfg, **kwargs): # try kwarging the vfixed
     try:
         dv.mkdir(cfg['file']['data_dir'])
@@ -62,7 +83,7 @@ def create_file(dv, cfg, **kwargs): # try kwarging the vfixed
                       }
 
     dv.new(cfg['file']['file_name']+"-plot", ("i", "j", var_name1, var_name2),
-           ('R', 'P', 'D', 'N', 'X', 'Y', 't'))
+           ('DC', 'AC', 'D', 'N', 'X', 'Y', 't'))
     print("Created {}".format(dv.get_name()))
 
     # Adding commens and parameters
@@ -84,7 +105,7 @@ def create_file(dv, cfg, **kwargs): # try kwarging the vfixed
     dv.add_parameter('vgate_pnts', cfg['meas_parameters']['vgate_pnts'])
     dv.add_parameter('extent', tuple(plot_parameters['extent']))
     dv.add_parameter('pxsize', tuple(plot_parameters['pxsize']))
-    dv.add_parameter('live_plots', [('vset', 'vgate', 'R')])
+    dv.add_parameter('live_plots', (('vgate', 'vset', 'DC'), ('vgate', 'DC'), ('vgate', 'vset', 'AC'), ('vgate', 'AC')))
     #dv.add_parameter('plot', cfg['plot'])
 
     if kwargs is not None:
@@ -111,18 +132,70 @@ def main():
 
     measurement = cfg['measurement']
     measurement_settings = cfg[measurement]
+    max_values = cfg['max_values']
+
+
+    ## DacAdc settings
+
     dacadc_settings = cfg['dacadc_settings']
+    timeout = dacadc_settings['timeout']
+    dac1_ch = dacadc_settings['dac1_ch']
+    dac2_ch = dacadc_settings['dac2_ch']
+    adc1_ch = dacadc_settings['adc1_ch']
+    adc2_ch = dacadc_settings['adc2_ch']
+    delay_unit = dacadc_settings['delay_unit']
+    t_factor = time_factor(delay_unit)
+
+    # Meas parameters
     meas_parameters = cfg['meas_parameters']
     delay_meas = meas_parameters['delay']
+
+    # Ramp settings to first point
+    vgate2start_pnts = abs(int(meas_parameters['vgate_rng'][0] / max_values['vgate_step_size']))
+    if vgate2start_pnts < 2: vgate2start_pnts = 3
+    vgate2start_delay = abs(int(meas_parameters['vgate_rng'][0] / (vgate2start_pnts * max_values['vgate_rate']) * 1e6))
+    if vgate2start_delay < 1: vgate2start_delay = 10
+
+    vset2start_pnts = abs(int(meas_parameters['vset_rng'][0] / max_values['vset_step_size']))
+    if vset2start_pnts < 2: vset2start_pnts = 3
+    vset2start_delay = abs(int(meas_parameters['vset_rng'][0] / (vset2start_pnts * max_values['vset_rate']) * 1e6))
+    if vset2start_delay < 1: vset2start_delay = 10
+
+    # Ramp settings to next line
+    # Vgate ramps back whole range
+    vgate2next_pnts = abs(int((meas_parameters['vgate_rng'][1] - meas_parameters['vgate_rng'][0]) / max_values['vgate_step_size']))
+    if vgate2next_pnts < 2: vgate2next_pnts = 3
+    vgate2next_delay = abs(int((meas_parameters['vgate_rng'][1] - meas_parameters['vgate_rng'][0]) / (vgate2next_pnts * max_values['vgate_rate']) * 1e6))
+    if vgate2next_delay < 1: vset2next_delay = 10
+
+    # Vset ramps up to next line
+    vset2next_pnts = abs(int((meas_parameters['vset_rng'][1] - meas_parameters['vset_rng'][0]) / meas_parameters['vset_pnts'] / max_values['vset_step_size']))
+    if vset2next_pnts < 2: vset2next_pnts = 3
+    vset2next_delay = abs(int((meas_parameters['vset_rng'][1] - meas_parameters['vset_rng'][0]) / meas_parameters['vset_pnts'] / (vset2next_pnts * max_values['vset_rate']) * 1e6))
+    if vset2next_delay < 1: vset2next_delay = 10
+
+
+    # Ramp settings to zero
+    vgate2zero_pnts = abs(int(meas_parameters['vgate_rng'][1] / max_values['vgate_step_size']))
+    if vgate2zero_pnts < 2: vgate2zero_pnts = 3
+    vgate2zero_delay = abs(int(meas_parameters['vgate_rng'][1] / (vgate2zero_pnts * max_values['vgate_rate']) * 1e6))
+    if vgate2zero_delay < 1: vgate2zero_delay = 10
+
+    vset2zero_pnts = abs(int(meas_parameters['vset_rng'][1] / max_values['vset_step_size']))
+    if vset2zero_pnts < 2: vset2zero_pnts = 3
+    vset2zero_delay = abs(int(meas_parameters['vset_rng'][1] / (vset2zero_pnts * max_values['vset_rate']) * 1e6))
+    if vset2zero_delay < 1: vset2zero_delay = 10
+
+    # Safety check
+    safety_check(meas_parameters, cfg['max_values'], t_factor)
 
 
     # Lockin settings
     lockin_settings = cfg['lockin_settings']
     tc_var = lockin_settings['tc']
-    sens_var = lockin_settings['sensitiviy']
-    #delay_meas = 3 * tc_var * 1e6
+    sens_var = lockin_settings['sensitivity']
 
-    if delay_meas* 1e-6 < 3*tc_var:
+    if delay_meas* t_factor < 3*tc_var:
         print("Warning: delay is less than 3x lockin time constant.")
     
     # Labrad connections and Instrument Configurations
@@ -132,8 +205,8 @@ def main():
     dv = cxn.data_vault
     dac_adc = cxn.dac_adc
     dac_adc.select_device()
-    timeout = dacadc_settings['timeout']
-    dac_adc.delay_unit(dacadc_settings['delay_unit'])
+    dac_adc.initialize()
+    dac_adc.delay_unit(delay_unit)
     dac_adc.timeout(U.Value(timeout, 's'))
     dac_adc.read()
     dac_adc.read()
@@ -143,33 +216,26 @@ def main():
 
     # Mesh parameters
 
-    pxsize = (meas_parameters['vset_pnts'], meas_parameters['vgate_pnts'])
-    extent = (meas_parameters['vset_rng'][0], meas_parameters['vset_rng'][1],
-              meas_parameters['vgate_rng'][0], meas_parameters['vgate_rng'][1])
+    pxsize = (meas_parameters['vgate_pnts'], meas_parameters['vset_pnts'])
+    extent = (meas_parameters['vgate_rng'][0], meas_parameters['vgate_rng'][1],
+              meas_parameters['vset_rng'][0], meas_parameters['vset_rng'][1])
     num_x = pxsize[0]
     num_y = pxsize[1]
     print(extent, pxsize)
 
     # Start timer
-    time.sleep(.25)
+    time.sleep(3)
     t0 = time.time()
 
     # Estimated time
-    est_time = (num_x * num_y + num_y) * delay_meas * 1e-6 / 60.0
-    dt = num_x*delay_meas*1e-6/60.0
+    est_time = (num_x * num_y * delay_meas * t_factor + vgate2next_pnts * vgate2next_delay * 1e-6 * num_y) / 60.0
+    dt = num_x*delay_meas*t_factor/60.0
     print("Will take a total of {} mins. With each line trace taking {} This deprecated for SET.".format(est_time, dt))
 
     m = mesh(offset=(0.0, -0.0), xrange=(extent[0], extent[1]),
              yrange=(extent[2], extent[3]), pxsize=pxsize)
 
     mdn = m # for future implementation
-
-    dac1_ch = dacadc_settings['dac1_ch']
-    dac2_ch = dacadc_settings['dac2_ch']
-    adc1_ch = dacadc_settings['adc1_ch']
-    adc2_ch = dacadc_settings['adc2_ch']
-
-    # TODO initial ramp
 
     for i in range(num_y):
 
@@ -199,18 +265,24 @@ def main():
 
         # Ramping to initial values
         if i == 0:
-            d_read = dac_adc.ramp1(dac1_ch, 0, vec_x[start], 10000, 300)
+            dac_adc.delay_unit(0)
+            d_read = dac_adc.ramp1(dac1_ch, 0, vec_x[start], vgate2start_pnts, vgate2start_delay)
             time.sleep(1)
         else:
+            dac_adc.delay_unit(0)
             previous_vec_x = m[i-1, :][:, 0] 
-            d_read = dac_adc.ramp1(dac1_ch, previous_vec_x[stop], vec_x[start], 10000, 300)
+            d_read = dac_adc.ramp1(dac1_ch, previous_vec_x[stop], vec_x[start], vgate2next_pnts, vgate2next_delay)
 
         if i == 0:
-            d_read = dac_adc.ramp1(dac2_ch, 0, vec_y[start], 200, 500)
+            dac_adc.delay_unit(0)
+            d_read = dac_adc.ramp1(dac2_ch, 0, vec_y[start], vset2start_pnts, vset2start_delay)
             time.sleep(1)
         else:
+            dac_adc.delay_unit(0)
             previous_vec_y = m[i-1, :][:, 1] 
-            d_read = dac_adc.ramp1(dac2_ch, previous_vec_y[stop], vec_y[start], 200, 500)
+            d_read = dac_adc.ramp1(dac2_ch, previous_vec_y[stop], vec_y[start], vset2next_pnts, vset2next_delay)
+
+        dac_adc.delay_unit(delay_unit)
 
         print("{} of {}  --> Ramping. Points: {}".format(i + 1, num_y, num_points))
         d_read = dac_adc.buffer_ramp([dac1_ch, dac2_ch],
@@ -223,9 +295,10 @@ def main():
 
         data_x[start:stop + 1], data_y[start:stop + 1] = d_tmp
 
-        radius = np.sqrt(np.square(data_x) + np.square(data_y)) * sens_var
-        #radius = np.array(data_x)
-        phase = np.arctan2(data_y, data_x)
+        #radius = np.sqrt(np.square(data_x) + np.square(data_y)) * sens_var
+        radius = np.array(data_x)
+        phase = np.array(data_y)
+        #phase = np.arctan2(data_y, data_x)
 
         # TODO rescale lock in sensitivity
 
@@ -238,15 +311,10 @@ def main():
         # Ramp down to zero if last point
         if (i == num_y-1):
             dac_adc.ramp1(dac1_ch, vec_x[stop], 0, 10000, 300)
-            dac_adc.ramp1(dac2_ch, vec_x[stop], 0, 1000, 5000)
+            dac_adc.ramp1(dac2_ch, vec_x[stop], 0, 1000, 500)
 
 
     print("it took {} s. to write data".format(time.time() - t0))
-
-
-
-
-    # TODO ramp to zero
 
 if __name__ == '__main__':
     main()
