@@ -16,22 +16,23 @@
 
 file:
   data_dir: CBO
-  file_name: Debugging
-  comment: Comment
+  file_name: AC-DC-2T
+  comment: Bias tee 220 ohm and 100 micro farad which lowers the ac sineout by 7.26/10.
 
 #lockin: SR830  # Write 'SR830' or '7820'
 
 lockin_settings:
-  tc: 0.03
+  tc: 0.1
+  tc_db: 24
   sensitivity: 0.1
-  attenuation: 40
-  amplitude: 0.004
-  freq: 371.6
-  phase: 87.28
+  attenuation: 0
+  amplitude: 0.01
+  freq: 500.0
+  phase: 142.31
 
 dacadc_settings:
   delay_unit: 1 # 0 for microseconds and 1 for miliseconds
-  timeout: 20  # Seconds
+  timeout: 30  # Seconds
   dac1_ch: 0   # Vgate fast
   dac2_ch: 1   # Vset slow
   dac1_offset: 0.0 # Not in use
@@ -46,15 +47,15 @@ CBO:
   v2: vset [V]
 
 meas_parameters:
-  vgate_pnts: 2000 #200
-  vset_pnts: 120 #550
+  vgate_pnts: 1200 #200
+  vset_pnts: 80 #550
   vgate_rng:
-    - -10 #-7.0
-    - 10 #7.0
+    - -2.0 #-7.0
+    - 10.0 #7.0
   vset_rng:
-    - -8.0    #-10.0
-    - 8.0    #10.0
-  delay: 90  # Check delay unit
+    - -7.0    #-10.0
+    - 7.0    #10.0
+  delay: 300  # Check delay unit
 
 # BE CAREFULL!!!
 max_values:

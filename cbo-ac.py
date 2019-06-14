@@ -195,7 +195,7 @@ def main():
     tc_var = lockin_settings['tc']
     sens_var = lockin_settings['sensitivity']
 
-    if delay_meas* t_factor < 3*tc_var:
+    if delay_meas* t_factor <= 3*tc_var:
         print("Warning: delay is less than 3x lockin time constant.")
     
     # Labrad connections and Instrument Configurations
@@ -267,7 +267,7 @@ def main():
         if i == 0:
             dac_adc.delay_unit(0)
             d_read = dac_adc.ramp1(dac1_ch, 0, vec_x[start], vgate2start_pnts, vgate2start_delay)
-            time.sleep(1)
+            time.sleep(2)
         else:
             dac_adc.delay_unit(0)
             previous_vec_x = m[i-1, :][:, 0] 
@@ -276,13 +276,14 @@ def main():
         if i == 0:
             dac_adc.delay_unit(0)
             d_read = dac_adc.ramp1(dac2_ch, 0, vec_y[start], vset2start_pnts, vset2start_delay)
-            time.sleep(1)
+            time.sleep(2)
         else:
             dac_adc.delay_unit(0)
             previous_vec_y = m[i-1, :][:, 1] 
             d_read = dac_adc.ramp1(dac2_ch, previous_vec_y[stop], vec_y[start], vset2next_pnts, vset2next_delay)
 
         dac_adc.delay_unit(delay_unit)
+
 
         print("{} of {}  --> Ramping. Points: {}".format(i + 1, num_y, num_points))
         d_read = dac_adc.buffer_ramp([dac1_ch, dac2_ch],
@@ -297,7 +298,7 @@ def main():
 
         #radius = np.sqrt(np.square(data_x) + np.square(data_y)) * sens_var
         radius = np.array(data_x)
-        phase = np.array(data_y)
+        phase = np.array(data_y) * sens_var
         #phase = np.arctan2(data_y, data_x)
 
         # TODO rescale lock in sensitivity
